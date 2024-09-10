@@ -16,7 +16,7 @@ import (
 // blockCreator holds number and hash of latest block
 // so that next block will be created based on it.
 type blockCreator struct {
-	hash   []byte
+	hash   []byte // 当前区块hash orderer/consensus/etcdraft/blockcreator.go:25
 	number uint64
 
 	logger *flogging.FabricLogger

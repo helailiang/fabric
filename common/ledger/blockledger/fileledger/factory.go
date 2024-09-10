@@ -18,6 +18,7 @@ type blockStoreProvider interface {
 	Open(ledgerid string) (*blkstorage.BlockStore, error)
 	List() ([]string, error)
 	Close()
+	Remove(ledgerid string) error
 }
 
 type fileLedgerFactory struct {
@@ -59,6 +60,10 @@ func (flf *fileLedgerFactory) ChannelIDs() []string {
 // Close releases all resources acquired by the factory
 func (flf *fileLedgerFactory) Close() {
 	flf.blkstorageProvider.Close()
+}
+
+func (flf *fileLedgerFactory) Remove(ledgerid string) error {
+	return flf.blkstorageProvider.Remove(ledgerid)
 }
 
 // New creates a new ledger factory

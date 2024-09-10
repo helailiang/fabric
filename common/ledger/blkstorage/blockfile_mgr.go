@@ -114,6 +114,7 @@ func newBlockfileMgr(id string, conf *Conf, indexConfig *IndexConfig, indexStore
 		logger.Debug(`Synching block information from block storage (if needed)`)
 		syncBlockfilesInfoFromFS(rootDir, blockfilesInfo)
 	}
+	logger.Infof("保存===>blkMgrInfoKey")
 	err = mgr.saveBlkfilesInfo(blockfilesInfo, true)
 	if err != nil {
 		panic(fmt.Sprintf("Could not save next block file info to db: %s", err))
@@ -559,6 +560,7 @@ func (mgr *blockfileMgr) retrieveBlockHeaderByNumber(blockNum uint64) (*common.B
 			blockNum, mgr.firstPossibleBlockNumberInBlockFiles(),
 		)
 	}
+	//从index 中获取指定快高所在的偏移量和数据大小
 	loc, err := mgr.index.getBlockLocByBlockNum(blockNum)
 	if err != nil {
 		return nil, err
@@ -714,6 +716,10 @@ func scanForLastCompleteBlock(rootDir string, fileNum int, startingOffset int64)
 	var errRead error
 	var blockBytes []byte
 	for {
+		logger.Infof("从文件中获取块:%d", numBlocks)
+		if numBlocks > 29 {
+			logger.Infof("从文件中获取块:%d", numBlocks)
+		}
 		blockBytes, errRead = blockStream.nextBlockBytes()
 		if blockBytes == nil || errRead != nil {
 			break

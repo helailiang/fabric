@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package kvledger
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/hyperledger/fabric/common/metrics"
@@ -18,6 +19,8 @@ type stats struct {
 	blockAndPvtdataStoreCommitTime metrics.Histogram
 	statedbCommitTime              metrics.Histogram
 	transactionsCount              metrics.Counter
+	blockTransactionsCount         metrics.Gauge
+	transactionsAllCount           metrics.Counter
 }
 
 func newStats(metricsProvider metrics.Provider) *stats {
@@ -26,6 +29,9 @@ func newStats(metricsProvider metrics.Provider) *stats {
 	stats.blockAndPvtdataStoreCommitTime = metricsProvider.NewHistogram(blockAndPvtdataStoreCommitTimeOpts)
 	stats.statedbCommitTime = metricsProvider.NewHistogram(statedbCommitTimeOpts)
 	stats.transactionsCount = metricsProvider.NewCounter(transactionCountOpts)
+	stats.blockTransactionsCount = metricsProvider.NewGauge(blocktransactionCountOpts) //hll
+	stats.transactionsAllCount = metricsProvider.NewCounter(transactionAllCountOpts)
+
 	return stats
 }
 
@@ -74,6 +80,28 @@ func (s *ledgerStats) updateTransactionsStats(
 		).Add(1)
 	}
 }
+func (s *ledgerStats) updateTransactionsAllStats(
+	txstatsInfo []*validation.TxStatInfo,
+) {
+	for _, _ = range txstatsInfo {
+		s.stats.transactionsAllCount.With(
+			"channel", s.ledgerid,
+		).Add(1)
+	}
+}
+
+func (s *ledgerStats) blockTransactionCountStats(
+	txstatsInfo []*validation.TxStatInfo,
+) {
+	for _, txstat := range txstatsInfo {
+		s.stats.blockTransactionsCount.With(
+			"channel", s.ledgerid,
+			"block_num", strconv.FormatUint(txstat.BlockNumber, 10),
+			//"transaction_count", chaincodeName,
+		).Set(float64(len(txstatsInfo)))
+		break
+	}
+}
 
 var (
 	blockProcessingTimeOpts = metrics.HistogramOpts{
@@ -113,5 +141,22 @@ var (
 		Help:         "Number of transactions processed.",
 		LabelNames:   []string{"channel", "transaction_type", "chaincode", "validation_code"},
 		StatsdFormat: "%{#fqname}.%{channel}.%{transaction_type}.%{chaincode}.%{validation_code}",
+	}
+	// hll 块交易条数
+	blocktransactionCountOpts = metrics.GaugeOpts{
+		Namespace:    "ledger",
+		Subsystem:    "",
+		Name:         "block_transaction_count",
+		Help:         "Block Number of transactions processed.",
+		LabelNames:   []string{"channel", "block_num"},
+		StatsdFormat: "%{#fqname}.%{channel}.%{block_num}",
+	}
+	transactionAllCountOpts = metrics.CounterOpts{
+		Namespace:    "ledger",
+		Subsystem:    "",
+		Name:         "block_transaction_all_count",
+		Help:         "The total number of channel transactions.",
+		LabelNames:   []string{"channel"},
+		StatsdFormat: "%{#fqname}.%{channel}",
 	}
 )

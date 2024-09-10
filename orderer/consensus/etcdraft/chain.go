@@ -627,6 +627,7 @@ func (c *Chain) run() {
 				select {
 				case b := <-ch:
 					data := protoutil.MarshalOrPanic(b)
+					c.logger.Infof("hll=>Leader提交区块[%d] 到raft 集群：DataHash:%x; PreviousHash:%x", b.Header.Number, b.Header.DataHash, b.Header.PreviousHash)
 					if err := c.Node.Propose(ctx, data); err != nil {
 						c.logger.Errorf("Failed to propose block [%d] to raft and discard %d blocks in queue: %s", b.Header.Number, len(ch), err)
 						return
@@ -655,6 +656,8 @@ func (c *Chain) run() {
 
 	for {
 		select {
+		// submitC 通道：接收提交请求，根据当前节点的角色进行处理：
+		// 如果节点是 leader，将请求进行排序和处理；如果节点不是 leader，将请求转发给 leader 节点处理。
 		case s := <-submitC:
 			if s == nil {
 				// polled by `WaitReady`
@@ -667,10 +670,11 @@ func (c *Chain) run() {
 			}
 
 			s.leader <- soft.Lead
+			// 如果当前节点的领导者不是自身节点，则继续下一次循环。
 			if soft.Lead != c.raftID {
 				continue
 			}
-
+			// 如果当前节点是领导者，对提交请求进行排序和处理
 			batches, pending, err := c.ordered(s.req)
 			if err != nil {
 				c.logger.Errorf("Failed to order message: %s", err)
@@ -681,7 +685,7 @@ func (c *Chain) run() {
 			} else {
 				stopTimer()
 			}
-
+			// 提交排序后的请求并出块
 			c.propose(propC, bc, batches...)
 
 			if c.configInflight {
@@ -703,10 +707,12 @@ func (c *Chain) run() {
 					atomic.StoreUint64(&c.lastKnownLeader, newLeader)
 
 					if newLeader == c.raftID {
+						c.logger.Infof("hll=> %d变成leader", c.raftID)
 						propC, cancelProp = becomeLeader()
 					}
 
 					if soft.Lead == c.raftID {
+						c.logger.Infof("hll=> %d变成Follower", c.raftID)
 						becomeFollower()
 					}
 				}
@@ -864,7 +870,7 @@ func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelop
 	if err != nil {
 		return nil, false, errors.Errorf("bad message: %s", err)
 	}
-
+	//如果是 Config 消息，调用 BlockCutter.Cut() 直接切割区块
 	if isconfig {
 		// ConfigMsg
 		if msg.LastValidationSeq < seq {
@@ -885,6 +891,7 @@ func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelop
 		return batches, false, nil
 	}
 	// it is a normal message
+	//如果是 Normal 消息，调用 BlockCutter.Ordered() 进入缓存排序，根据当前交易量决定增加交易或切割
 	if msg.LastValidationSeq < seq {
 		c.logger.Warnf("Normal message was validated against %d, although current config seq has advanced (%d)", msg.LastValidationSeq, seq)
 		if _, err := c.support.ProcessNormalMsg(msg.Payload); err != nil {
@@ -892,6 +899,7 @@ func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelop
 			return nil, true, errors.Errorf("bad normal message: %s", err)
 		}
 	}
+	// 对交易进行排序 orderer/common/blockcutter/blockcutter.go
 	batches, pending = c.support.BlockCutter().Ordered(msg.Payload)
 	return batches, pending, nil
 
@@ -899,10 +907,12 @@ func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelop
 
 func (c *Chain) propose(ch chan<- *common.Block, bc *blockCreator, batches ...[]*common.Envelope) {
 	for _, batch := range batches {
+		// 创建下一个区块
 		b := bc.createNextBlock(batch)
 		c.logger.Infof("Created block [%d], there are %d blocks in flight", b.Header.Number, c.blockInflight)
 
 		select {
+		// 将创建的区块发送到通道中
 		case ch <- b:
 		default:
 			c.logger.Panic("Programming error: limit of in-flight blocks does not properly take effect or block is proposed by follower")
@@ -1038,6 +1048,8 @@ func (c *Chain) apply(ents []raftpb.Entry) {
 			}
 
 			block := protoutil.UnmarshalBlockOrPanic(ents[i].Data)
+			c.logger.Infof("hll=> Received block with block.Header: Number:%d,PreviousHash:%x, DataHash:%x",
+				block.Header.Number, block.Header.PreviousHash, block.Header.DataHash)
 			c.writeBlock(block, ents[i].Index)
 			c.Metrics.CommittedBlockNumber.Set(float64(block.Header.Number))
 

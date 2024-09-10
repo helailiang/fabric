@@ -70,6 +70,7 @@ func newBlockIndex(indexConfig *IndexConfig, db *leveldbhelper.DBHandle) (*block
 func (index *blockIndex) getLastBlockIndexed() (uint64, error) {
 	var blockNumBytes []byte
 	var err error
+	//index 中通过获取indexSavePointKey 得db中存储的快高
 	if blockNumBytes, err = index.db.Get(indexSavePointKey); err != nil {
 		return 0, err
 	}
@@ -80,6 +81,7 @@ func (index *blockIndex) getLastBlockIndexed() (uint64, error) {
 }
 
 func (index *blockIndex) indexBlock(blockIdxInfo *blockIdxInfo) error {
+	logger.Infof("hll===>index block:blockNum:%d", blockIdxInfo.blockNum)
 	// do not index anything
 	if len(index.indexItemsMap) == 0 {
 		logger.Debug("Not indexing block... as nothing to index")
@@ -454,8 +456,8 @@ func decodeBlockNum(blockNumBytes []byte) uint64 {
 }
 
 type locPointer struct {
-	offset      int
-	bytesLength int
+	offset      int // 在文件中的偏移量
+	bytesLength int // 数据大小
 }
 
 func (lp *locPointer) String() string {
@@ -465,7 +467,7 @@ func (lp *locPointer) String() string {
 
 // fileLocPointer
 type fileLocPointer struct {
-	fileSuffixNum int
+	fileSuffixNum int // 文件后缀
 	locPointer
 }
 

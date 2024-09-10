@@ -8,6 +8,9 @@ package validation
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
@@ -45,6 +48,7 @@ type TxStatInfo struct {
 	TxType         common.HeaderType
 	ChaincodeID    *peer.ChaincodeID
 	NumCollections int
+	BlockNumber    uint64 // number hll
 }
 
 // NewCommitBatchPreparer constructs a validator that internally manages statebased validator and in addition
@@ -78,6 +82,7 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	var err error
 
 	logger.Debug("preprocessing ProtoBlock...")
+	logger.Warning("hll => preprocessing ProtoBlock...")
 	if internalBlock, txsStatInfo, err = preprocessProtoBlock(
 		p.postOrderSimulatorProvider,
 		p.db.ValidateKeyValue,
@@ -109,11 +114,34 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	for i := range txsFilter {
 		txsStatInfo[i].ValidationCode = txsFilter.Flag(i)
 	}
+	WriteFile("/var/hyperledger/production/count.json", fmt.Sprintf("%d  %d", blk.Header.Number, len(txsStatInfo)), 0644)
+
 	return &privacyenabledstate.UpdateBatch{
 		PubUpdates:  pubAndHashUpdates.publicUpdates,
 		HashUpdates: pubAndHashUpdates.hashUpdates,
 		PvtUpdates:  pvtUpdates,
 	}, txsStatInfo, nil
+}
+
+func WriteFile(file string, buf string, perm os.FileMode) error {
+	dir := path.Dir(file)
+	// Create the directory if it doesn't exist
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0755)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create directory '%s' for file '%s'", dir, file)
+		}
+	}
+
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_APPEND, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(buf + "\n")
+	if err1 := f.Close(); err1 != nil && err == nil {
+		err = err1
+	}
+	return err
 }
 
 // validateAndPreparePvtBatch pulls out the private write-set for the transactions that are marked as valid
@@ -203,13 +231,18 @@ func preprocessProtoBlock(postOrderSimulatorProvider PostOrderSimulatorProvider,
 		var chdr *common.ChannelHeader
 		var payload *common.Payload
 		var err error
-		txStatInfo := &TxStatInfo{TxType: -1}
+		txStatInfo := &TxStatInfo{TxType: -1, BlockNumber: blk.Header.Number}
 		txsStatInfo = append(txsStatInfo, txStatInfo)
 		if env, err = protoutil.GetEnvelopeFromBlock(envBytes); err == nil {
 			if payload, err = protoutil.UnmarshalPayload(env.Payload); err == nil {
 				chdr, err = protoutil.UnmarshalChannelHeader(payload.Header.ChannelHeader)
 			}
 		}
+		logger.Warningf("hll =>Channel [%s]: Block [%d] Transaction index [%d] TxId [%s]"+
+			" marked as invalid by committer. Reason code [%s]",
+			chdr.GetChannelId(), blk.Header.Number, txIndex, chdr.GetTxId(),
+			txsFilter.Flag(txIndex).String())
+
 		if txsFilter.IsInvalid(txIndex) {
 			// Skipping invalid transaction
 			logger.Warningf("Channel [%s]: Block [%d] Transaction index [%d] TxId [%s]"+
@@ -228,6 +261,7 @@ func preprocessProtoBlock(postOrderSimulatorProvider PostOrderSimulatorProvider,
 		logger.Debugf("txType=%s", txType)
 		txStatInfo.TxType = txType
 		if txType == common.HeaderType_ENDORSER_TRANSACTION {
+			logger.Warningf("hll => Endorser transaction index [%d] TxType:%d", txIndex, txType)
 			// extract actions from the envelope message
 			respPayload, err := protoutil.GetActionFromEnvelope(envBytes)
 			if err != nil {
@@ -241,6 +275,7 @@ func preprocessProtoBlock(postOrderSimulatorProvider PostOrderSimulatorProvider,
 				continue
 			}
 		} else {
+			logger.Warningf("hll => 非 Endorser transaction index [%d] TxType:%d", txIndex, txType)
 			rwsetProto, err := processNonEndorserTx(
 				env,
 				chdr.TxId,

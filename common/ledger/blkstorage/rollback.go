@@ -114,6 +114,7 @@ func (r *rollbackMgr) deleteIndexEntriesRange(startBlkNum, endBlkNum uint64) err
 	// index would impact the time taken to recover the peer. We need to analyze
 	// a bit before making a decision on rollback vs drop of index. FAB-15672
 	batch := r.indexStore.db.NewUpdateBatch()
+	// 获取指定快高在block文件中的位置
 	lp, err := r.indexStore.getBlockLocByBlockNum(startBlkNum)
 	if err != nil {
 		return err
@@ -135,6 +136,7 @@ func (r *rollbackMgr) deleteIndexEntriesRange(startBlkNum, endBlkNum uint64) err
 		if err != nil {
 			return err
 		}
+		// 删除index中的 blocks hash txid 等关键key
 		addIndexEntriesToBeDeleted(batch, blockInfo, r.indexStore)
 		numberOfBlocksToRetrieve--
 	}
@@ -192,12 +194,15 @@ func (r *rollbackMgr) rollbackBlockFiles() error {
 	}
 
 	logger.Infof("Truncating block file [%d] to the end boundary of block number [%d]", targetFileNum, r.targetBlockNum)
+	logger.Infof("遍历账本文件：%s, 获取指定快高:%d 在文件中的偏移量", r.ledgerDir, r.targetBlockNum)
 	endOffset, err := calculateEndOffSet(r.ledgerDir, targetFileNum, r.targetBlockNum)
 	if err != nil {
 		return err
 	}
 
 	filePath := deriveBlockfilePath(r.ledgerDir, targetFileNum)
+	logger.Infof("删除账本数据，从指定偏移量：账本文件：%s, 获取指定快高:%d 在文件中的偏移量:%d", filePath, r.targetBlockNum, endOffset)
+
 	if err := os.Truncate(filePath, endOffset); err != nil {
 		return errors.Wrapf(err, "error trucating the block file [%s]", filePath)
 	}

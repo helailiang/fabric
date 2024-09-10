@@ -43,9 +43,9 @@ type blockStream struct {
 // blockPlacementInfo captures the information related
 // to block's placement in the file.
 type blockPlacementInfo struct {
-	fileNum          int
-	blockStartOffset int64
-	blockBytesOffset int64
+	fileNum          int   // 区块所在的文件
+	blockStartOffset int64 // 当前偏移量
+	blockBytesOffset int64 // 当前区块头数据长度，即需要跳过的偏移量
 }
 
 // /////////////////////////////////
@@ -91,6 +91,7 @@ func (s *blockfileStream) nextBlockBytesAndPlacementInfo() ([]byte, *blockPlacem
 	}
 	if s.currentOffset == fileInfo.Size() {
 		logger.Debugf("Finished reading file number [%d]", s.fileNum)
+		logger.Infof("遍历完块文件[%s] [%d]", s.file.Name(), s.fileNum)
 		return nil, nil, nil
 	}
 	remainingBytes := fileInfo.Size() - s.currentOffset
@@ -102,9 +103,11 @@ func (s *blockfileStream) nextBlockBytesAndPlacementInfo() ([]byte, *blockPlacem
 		moreContentAvailable = false
 	}
 	logger.Debugf("Remaining bytes=[%d], Going to peek [%d] bytes", remainingBytes, peekBytes)
+	// 获取偏移量之后8个字节数据 而不会移动读取位置
 	if lenBytes, err = s.reader.Peek(peekBytes); err != nil {
 		return nil, nil, errors.Wrapf(err, "error peeking [%d] bytes from block file", peekBytes)
 	}
+	// 解析protobuf 数据 获取【数据的完整长度、标明数据长度的头信息的长度】
 	length, n := proto.DecodeVarint(lenBytes)
 	if n == 0 {
 		// proto.DecodeVarint did not consume any byte at all which means that the bytes
@@ -121,9 +124,11 @@ func (s *blockfileStream) nextBlockBytesAndPlacementInfo() ([]byte, *blockPlacem
 		return nil, nil, ErrUnexpectedEndOfBlockfile
 	}
 	// skip the bytes representing the block size
+	// 跳过 信息头长度
 	if _, err = s.reader.Discard(n); err != nil {
 		return nil, nil, errors.Wrapf(err, "error discarding [%d] bytes", n)
 	}
+	// 解析数据
 	blockBytes := make([]byte, length)
 	if _, err = io.ReadAtLeast(s.reader, blockBytes, int(length)); err != nil {
 		logger.Errorf("Error reading [%d] bytes from file number [%d], error: %s", length, s.fileNum, err)
@@ -135,6 +140,8 @@ func (s *blockfileStream) nextBlockBytesAndPlacementInfo() ([]byte, *blockPlacem
 		blockBytesOffset: s.currentOffset + int64(n)}
 	s.currentOffset += int64(n) + int64(length)
 	logger.Debugf("Returning blockbytes - length=[%d], placementInfo={%s}", len(blockBytes), blockPlacementInfo)
+	logger.Debugf("下次将从偏移量：%d 开始读取", blockPlacementInfo.blockBytesOffset+int64(len(blockBytes)))
+
 	return blockBytes, blockPlacementInfo, nil
 }
 

@@ -64,7 +64,7 @@ PROJECT_VERSION=$(BASE_VERSION)-snapshot-$(EXTRA_VERSION)
 
 # TWO_DIGIT_VERSION is derived, e.g. "2.0", especially useful as a local tag
 # for two digit references to most recent baseos and ccenv patch releases
-TWO_DIGIT_VERSION = $(shell echo $(BASE_VERSION) | cut -d '.' -f 1,2)
+#TWO_DIGIT_VERSION = $(shell echo $(BASE_VERSION) | cut -d '.' -f 1,2)
 
 PKGNAME = github.com/hyperledger/fabric
 ARCH=$(shell go env GOARCH)
@@ -229,8 +229,10 @@ $(BUILD_DIR)/images/%/$(DUMMY):
 		$(BUILD_ARGS) \
 		-t $(DOCKER_NS)/fabric-$* ./$(BUILD_CONTEXT)
 	docker tag $(DOCKER_NS)/fabric-$* $(DOCKER_NS)/fabric-$*:$(BASE_VERSION)
-	docker tag $(DOCKER_NS)/fabric-$* $(DOCKER_NS)/fabric-$*:$(TWO_DIGIT_VERSION)
+	#docker tag $(DOCKER_NS)/fabric-$* $(DOCKER_NS)/fabric-$*:$(TWO_DIGIT_VERSION)
 	docker tag $(DOCKER_NS)/fabric-$* $(DOCKER_NS)/fabric-$*:$(DOCKER_TAG)
+	docker tag $(DOCKER_NS)/fabric-$* $(DOCKER_NS)/fabric-$*:hll
+
 	@touch $@
 
 # builds release packages for the host platform

@@ -34,7 +34,9 @@ func (mbsp *mockBlockStoreProvider) List() ([]string, error) {
 
 func (mbsp *mockBlockStoreProvider) Close() {
 }
-
+func (mbsp *mockBlockStoreProvider) Remove(ledgerid string) error {
+	return nil
+}
 func TestBlockstoreProviderError(t *testing.T) {
 	flf := &fileLedgerFactory{
 		blkstorageProvider: &mockBlockStoreProvider{error: fmt.Errorf("blockstorage provider error")},

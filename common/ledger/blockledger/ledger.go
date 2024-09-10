@@ -22,6 +22,7 @@ type Factory interface {
 
 	// Close releases all resources acquired by the factory
 	Close()
+	Remove(ledgerid string) error //hll
 }
 
 // Iterator is useful for a chain Reader to stream blocks as they are created

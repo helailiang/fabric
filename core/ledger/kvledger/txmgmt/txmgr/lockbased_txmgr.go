@@ -200,6 +200,24 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 		txmgr.reset()
 		return nil, nil, err
 	}
+	logger.Warning("hll => 打印监控交易信息...")
+	for i, txstat := range txstatsInfo {
+		transactionTypeStr := "unknown"
+		if txstat.TxType != -1 {
+			transactionTypeStr = txstat.TxType.String()
+		}
+
+		chaincodeName := "unknown"
+		if txstat.ChaincodeID != nil {
+			chaincodeName = txstat.ChaincodeID.Name + ":" + txstat.ChaincodeID.Version
+		}
+		logger.Warningf("hll => 打印监控交易信息...")
+
+		logger.Warningf("hll => 打印监控交易信息..index:%d => channel:%s, transaction_type:%s, chaincode:%s, validation_code:%s",
+			i, txmgr.ledgerid, transactionTypeStr,
+			chaincodeName, txstat.ValidationCode.String())
+	}
+
 	txmgr.current = &current{block: block, batch: batch}
 	if err := txmgr.invokeNamespaceListeners(); err != nil {
 		txmgr.reset()
