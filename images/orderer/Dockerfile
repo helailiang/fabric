@@ -29,13 +29,11 @@ ARG FABRIC_VER
 ARG GO_VER
 ARG GO_TAGS
 
-RUN apt update && apt install -y \
-    git \
-    gcc \
-    curl \
-    make
 
-RUN curl -sL https://go.dev/dl/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar zxf - -C /usr/local
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g'  /etc/apt/sources.list \
+    && sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g'  /etc/apt/sources.list \
+    &&  apt-get update && apt-get install -y git gcc curl make
+RUN curl -sL https://studygolang.com/dl/golang/go1.23.0.linux-amd64.tar.gz | tar zxf - -C /usr/local
 ENV PATH="/usr/local/go/bin:$PATH"
 
 ADD . .
