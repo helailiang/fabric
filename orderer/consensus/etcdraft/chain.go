@@ -151,13 +151,13 @@ type Chain struct {
 
 	rpc RPC
 
-	raftID    uint64
+	raftID    uint64 //当前节点的集群标识
 	channelID string
 
 	lastKnownLeader uint64
 	ActiveNodes     atomic.Value
 
-	submitC  chan *submit
+	submitC  chan *submit // orderer/consensus/etcdraft/chain.go:550
 	applyC   chan apply
 	observeC chan<- raft.SoftState // Notifies external observer on leader change (passed in optionally as an argument for tests)
 	haltC    chan struct{}         // Signals to goroutines that the chain is halting
@@ -173,7 +173,9 @@ type Chain struct {
 	confChangeInProgress *raftpb.ConfChange
 	justElected          bool // this is true when node has just been elected
 	configInflight       bool // this is true when there is config block or ConfChange in flight
-	blockInflight        int  // number of in flight blocks
+
+	//leader会记录propose出去的block，是不是在Raft里面形成了大多数一致，如果达成一致，leader会在本地commit，这个时候才会移除掉这条记录。
+	blockInflight int // number of in flight blocks
 
 	clock clock.Clock // Tests can inject a fake clock
 
@@ -354,7 +356,7 @@ func NewChain(
 
 // Start instructs the orderer to begin serving the chain and keep it current.
 func (c *Chain) Start() {
-	c.logger.Infof("Starting Raft node")
+	c.logger.Infof("bsn=> channelID:%s Starting Raft node", c.channelID)
 
 	if err := c.configureComm(); err != nil {
 		c.logger.Errorf("Failed to start chain, aborting: +%v", err)
@@ -548,6 +550,7 @@ func (c *Chain) Submit(req *orderer.SubmitRequest, sender uint64) error {
 	case c.submitC <- &submit{req, leadC}:
 		lead := <-leadC
 		if lead == raft.None {
+			c.logger.Infof("bsn=> %s当前没有领导", c.channelID)
 			c.Metrics.ProposalFailures.Add(1)
 			return errors.Errorf("no Raft leader")
 		}
@@ -634,9 +637,9 @@ func (c *Chain) run() {
 
 	var soft raft.SoftState
 	submitC := c.submitC
-	var bc *blockCreator
+	var bc *blockCreator // 保存最近一次创建block的信息1
 
-	var propC chan<- *common.Block
+	var propC chan<- *common.Block // 写:c.propose() 读： becomeLeader
 	var cancelProp context.CancelFunc
 	cancelProp = func() {} // no-op as initial value
 
@@ -652,7 +655,7 @@ func (c *Chain) run() {
 		// new leader, and wait for it to be committed before start serving new requests.
 		if cc := c.getInFlightConfChange(); cc != nil {
 			// The reason `ProposeConfChange` should be called in go routine is documented in `writeConfigBlock` method.
-			go func() {
+			go func() { //有配置未提交
 				if err := c.Node.ProposeConfChange(context.TODO(), *cc); err != nil {
 					c.logger.Warnf("Failed to propose configuration update to Raft node: %s", err)
 				}
@@ -671,7 +674,10 @@ func (c *Chain) run() {
 				select {
 				case b := <-ch:
 					data := protoutil.MarshalOrPanic(b)
-					c.logger.Infof("bsn=> Leader:%d 提交区块[%d] 到raft 集群：DataHash:%x; PreviousHash:%x", c.raftID, b.Header.Number, b.Header.DataHash, b.Header.PreviousHash)
+					c.logger.Infof("bsn=> Leader:%d 广播区块[%d] 到raft 集群：DataHash:%x; PreviousHash:%x", c.raftID, b.Header.Number, b.Header.DataHash, b.Header.PreviousHash)
+					//将data用Node.Propose发给Raft
+					//Propose的意思就是将日志广播出去，要群众都尽量保存起来，但还没有提交，等到leader收到半数以上的群众都响应说已经保存完了，
+					//leader这时就可以提交了，下一次Ready的时候就会带上committedindex
 					if err := c.Node.Propose(ctx, data); err != nil {
 						c.logger.Errorf("Failed to propose block [%d] to raft and discard %d blocks in queue: %s", b.Header.Number, len(ch), err)
 						return
@@ -703,6 +709,7 @@ func (c *Chain) run() {
 		// submitC 通道：接收提交请求，根据当前节点的角色进行处理：
 		// 如果节点是 leader，将请求进行排序和处理；如果节点不是 leader，将请求转发给 leader 节点处理。
 		case s := <-submitC:
+			c.logger.Infof("bsn=> Raft Leader:%d 排序和处理", c.raftID)
 			if s == nil {
 				// polled by `WaitReady`
 				continue
@@ -735,6 +742,7 @@ func (c *Chain) run() {
 				stopTimer()
 			}
 			// 提交排序后的请求并出块
+			c.logger.Infof("bsn=> channelID:%s Raft leader：%d 提交到集群", c.channelID, c.raftID)
 			c.propose(propC, bc, batches...)
 
 			if c.configInflight {
@@ -747,6 +755,7 @@ func (c *Chain) run() {
 			}
 
 		case app := <-c.applyC:
+			c.logger.Info("bsn=> 接收到Raft leader changed通知")
 			if app.soft != nil {
 				newLeader := atomic.LoadUint64(&app.soft.Lead) // etcdraft requires atomic access
 				if newLeader != soft.Lead {
@@ -807,17 +816,21 @@ func (c *Chain) run() {
 					}
 				}
 			}
-
+			c.logger.Infof("bsn=> 开始将Raft entry条目提交")
 			c.apply(app.entries)
 
 			if c.justElected {
+				c.logger.Infof("bsn=> %d 刚选上Raft leader", c.raftID)
 				msgInflight := c.Node.lastIndex() > c.appliedIndex
 				if msgInflight {
+					c.logger.Infof("bsn=> MemoryStorage的entry还没有写入账本,不能参与共识，当前已经写入账本的Index:%d, 内存中最后一个Index:%d",
+						c.appliedIndex, c.Node.lastIndex())
 					c.logger.Debugf("There are in flight blocks, new leader should not serve requests")
 					continue
 				}
 
 				if c.configInflight {
+					c.logger.Info("bsn=> 有Raft配置变更或config block进来还没有生效")
 					c.logger.Debugf("There is config block in flight, new leader should not serve requests")
 					continue
 				}
@@ -852,7 +865,7 @@ func (c *Chain) run() {
 		case sn := <-c.snapC:
 			if sn.Metadata.Index != 0 {
 				if sn.Metadata.Index <= c.appliedIndex {
-					c.logger.Debugf("Skip snapshot taken at index %d, because it is behind current applied index %d", sn.Metadata.Index, c.appliedIndex)
+					c.logger.Warnf("bsn=>Skip snapshot taken at index %d, because it is behind current applied index %d", sn.Metadata.Index, c.appliedIndex)
 					break
 				}
 
@@ -921,6 +934,7 @@ func (c *Chain) writeBlock(block *common.Block, index uint64) {
 //
 // It takes care of config messages as well as the revalidation of messages if the config sequence has advanced.
 func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelope, pending bool, err error) {
+	c.logger.Infof("bsn=> channelID:%s Raft leader：%d 排序", c.channelID, c.raftID)
 	seq := c.support.Sequence()
 
 	isconfig, err := c.isConfig(msg.Payload)
@@ -1023,7 +1037,7 @@ func (c *Chain) catchUp(snap *raftpb.Snapshot) error {
 	if err != nil {
 		return errors.Errorf("failed to unmarshal snapshot data to block: %s", err)
 	}
-
+	c.logger.Infof("bsn=>Snapshot is at block [%d], local block number is %d", b.Header.Number, c.lastBlock.Header.Number)
 	if c.lastBlock.Header.Number >= b.Header.Number {
 		c.logger.Warnf("Snapshot is at block [%d], local block number is %d, no sync needed", b.Header.Number, c.lastBlock.Header.Number)
 		return nil
@@ -1045,6 +1059,7 @@ func (c *Chain) catchUp(snap *raftpb.Snapshot) error {
 	c.logger.Infof("Catching up with snapshot taken at block [%d], starting from block [%d]", b.Header.Number, next)
 
 	for next <= b.Header.Number {
+		// 对接的Orderer的deliver服务拉取block
 		block := puller.PullBlock(next)
 		if block == nil {
 			return errors.Errorf("failed to fetch block [%d] from cluster", next)
@@ -1059,6 +1074,7 @@ func (c *Chain) catchUp(snap *raftpb.Snapshot) error {
 }
 
 func (c *Chain) commitBlock(block *common.Block) {
+	c.logger.Infof("bsn===> Writing  block:%d", block.Header.Number)
 	// read consenters metadata to write into the replicated block
 	blockMeta, err := protoutil.GetConsenterMetadataFromBlock(block)
 	if err != nil {
@@ -1121,7 +1137,7 @@ func (c *Chain) apply(ents []raftpb.Entry) {
 	if len(ents) == 0 {
 		return
 	}
-
+	c.logger.Infof("bsn=> first index of committed entry[%d] should <= appliedIndex[%d]+1", ents[0].Index, c.appliedIndex)
 	if ents[0].Index > c.appliedIndex+1 {
 		c.logger.Panicf("first index of committed entry[%d] should <= appliedIndex[%d]+1", ents[0].Index, c.appliedIndex)
 	}
@@ -1154,7 +1170,7 @@ func (c *Chain) apply(ents []raftpb.Entry) {
 				c.logger.Warnf("Failed to unmarshal ConfChange data: %s", err)
 				continue
 			}
-
+			c.logger.Infof("bsn=> 请求Raft集群更新应用配置ApplyConfChange, current nodes in channel: %+v", c.confState.Voters)
 			c.confState = *c.Node.ApplyConfChange(cc)
 
 			switch cc.Type {
@@ -1188,7 +1204,7 @@ func (c *Chain) apply(ents []raftpb.Entry) {
 						c.logger.Panicf("Failed to configure communication: %s", err)
 					}
 				}
-
+				//删除节点的通知，看下是不是本人，如果是，调用Halt，最终会去调Node的Stop，停掉该Raft节点
 				if shouldHalt {
 					c.logger.Infof("This node is being removed from replica set")
 					c.halt()
@@ -1224,6 +1240,7 @@ func (c *Chain) gc() {
 	for {
 		select {
 		case g := <-c.gcC:
+			c.logger.Infof("bsn=> 如果累加的accDataSize超过阈值，这里会将写入的最后一个block的相关信息通知给gcC通道")
 			c.Node.takeSnapshot(g.index, g.state, g.data)
 		case <-c.doneC:
 			c.logger.Infof("Stop garbage collecting")
@@ -1307,6 +1324,7 @@ func (c *Chain) writeConfigBlock(block *common.Block, index uint64) {
 
 	switch common.HeaderType(hdr.Type) {
 	case common.HeaderType_CONFIG:
+		//去ConfigBlock里面拿到EtcdRaft部分的配置，以及当前在用的配置
 		configMembership := c.detectConfChange(block)
 
 		c.raftMetadataLock.Lock()
@@ -1338,7 +1356,7 @@ func (c *Chain) writeConfigBlock(block *common.Block, index uint64) {
 					c.logger.Warnf("Failed to propose configuration update to Raft node: %s", err)
 				}
 			}()
-
+			// 更新到confChangeInProgress用来之后的跟踪进度
 			c.confChangeInProgress = configMembership.ConfChange
 
 			switch configMembership.ConfChange.Type {
@@ -1349,7 +1367,7 @@ func (c *Chain) writeConfigBlock(block *common.Block, index uint64) {
 			default:
 				c.logger.Panic("Programming error, encountered unsupported raft config change")
 			}
-
+			//表示现在有个配置更新已经提案给Raft
 			c.configInflight = true
 		} else {
 			if err := c.configureComm(); err != nil {

@@ -60,8 +60,9 @@ type node struct {
 }
 
 func (n *node) start(fresh, join bool) {
+	// 获取所有的raft节点信息
 	raftPeers := RaftPeers(n.metadata.ConsenterIds)
-	n.logger.Debugf("Starting raft node: #peers: %v", len(raftPeers))
+	n.logger.Infof("bsn=> Starting raft node: #peers: %v", len(raftPeers))
 
 	var campaign bool
 	if fresh {
@@ -78,6 +79,9 @@ func (n *node) start(fresh, join bool) {
 			if n.config.ID == number%uint64(len(raftPeers))+1 {
 				campaign = true
 			}
+			// 最终会启动 raft 的 node.
+			// 有点像设置配置文件.
+			// raftPeers, 对应的就是 ETCD_INITIAL_CLUSTER
 			n.Node = raft.StartNode(n.config, raftPeers)
 		}
 	} else {
@@ -165,11 +169,12 @@ func (n *node) run(campaign bool) {
 					close(elected)
 				}
 			}
-
+			n.logger.Infof("bsn=> 即将告诉raft，上次推送的ready，我已经处理完毕，准备好处理下一个Ready")
 			n.Advance()
 
 			// TODO(jay_guo) leader can write to disk in parallel with replicating
 			// to the followers and them writing to their disks. Check 10.2.1 in thesis
+			n.logger.Infof("bsn=> Leader可以并行写入磁盘，复制到follower, follower写入到自己的磁盘")
 			n.send(rd.Messages)
 
 		case <-n.chain.haltC:
@@ -203,6 +208,7 @@ func (n *node) send(msgs []raftpb.Message) {
 		}
 
 		msgBytes := protoutil.MarshalOrPanic(&msg)
+		n.logger.Infof("bsn=> 想%d发送channel:%s ConsensusRequest", msg.To, n.chainID)
 		err := n.rpc.SendConsensus(msg.To, &orderer.ConsensusRequest{Channel: n.chainID, Payload: msgBytes})
 		if err != nil {
 			n.ReportUnreachable(msg.To)
