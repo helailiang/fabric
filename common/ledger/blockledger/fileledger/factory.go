@@ -23,6 +23,8 @@ type blockStoreProvider interface {
 	Drop(ledgerid string) error
 	List() ([]string, error)
 	Close()
+	//Remove(ledgerid string) error //bsn
+
 }
 
 type fileLedgerFactory struct {

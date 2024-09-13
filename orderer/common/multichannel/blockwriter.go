@@ -90,6 +90,7 @@ func (bw *BlockWriter) CreateNextBlock(messages []*cb.Envelope) *cb.Block {
 // This call will block until the new config has taken effect, then will return
 // while the block is written asynchronously to disk.
 func (bw *BlockWriter) WriteConfigBlock(block *cb.Block, encodedMetadataValue []byte) {
+	logger.Infof("bsn===> Writing config block")
 	ctx, err := protoutil.ExtractEnvelope(block, 0)
 	if err != nil {
 		logger.Panicf("Told to write a config block, but could not get configtx: %s", err)
@@ -166,6 +167,7 @@ func (bw *BlockWriter) WriteConfigBlock(block *cb.Block, encodedMetadataValue []
 // then release the lock.  This allows the calling thread to begin assembling the next block
 // before the commit phase is complete.
 func (bw *BlockWriter) WriteBlock(block *cb.Block, encodedMetadataValue []byte) {
+	logger.Infof("bsn===> Writing  block")
 	bw.committingBlock.Lock()
 	bw.lastBlock = block
 
@@ -207,6 +209,7 @@ func (bw *BlockWriter) commitBlock(encodedMetadataValue []byte) {
 }
 
 func (bw *BlockWriter) addBlockSignature(block *cb.Block, consenterMetadata []byte) {
+	logger.Infof("bsn=> [channel: %s] 修改区块头meta %d", bw.support.ChannelID(), bw.lastConfigBlockNum)
 	blockSignature := &cb.MetadataSignature{
 		SignatureHeader: protoutil.MarshalOrPanic(protoutil.NewSignatureHeaderOrPanic(bw.support)),
 	}
@@ -238,7 +241,7 @@ func (bw *BlockWriter) addLastConfig(block *cb.Block) {
 	}
 
 	lastConfigValue := protoutil.MarshalOrPanic(&cb.LastConfig{Index: bw.lastConfigBlockNum})
-	logger.Debugf("[channel: %s] About to write block, setting its LAST_CONFIG to %d", bw.support.ChannelID(), bw.lastConfigBlockNum)
+	logger.Infof("[channel: %s] About to write block, setting its LAST_CONFIG to %d", bw.support.ChannelID(), bw.lastConfigBlockNum)
 
 	block.Metadata.Metadata[cb.BlockMetadataIndex_LAST_CONFIG] = protoutil.MarshalOrPanic(&cb.Metadata{
 		Value: lastConfigValue,

@@ -33,14 +33,12 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g'  /etc/apt/sources.list \
     && sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g'  /etc/apt/sources.list \
     &&  apt-get update && apt-get install -y git gcc curl make
 
-
 RUN curl -sL https://studygolang.com/dl/golang/go1.23.0.linux-amd64.tar.gz | tar zxf - -C /usr/local
 ENV PATH="/usr/local/go/bin:$PATH"
 
 ADD . .
 
-RUN make peer GO_TAGS=${GO_TAGS} FABRIC_VER=${FABRIC_VER}
-RUN make ccaasbuilder
+RUN make orderer GO_TAGS=${GO_TAGS} FABRIC_VER=${FABRIC_VER}
 
 
 ###############################################################################
@@ -50,8 +48,6 @@ RUN make ccaasbuilder
 ARG UBUNTU_VER
 FROM ubuntu:${UBUNTU_VER}
 
-ARG TARGETOS
-ARG TARGETARCH
 ARG FABRIC_VER
 
 # set up nsswitch.conf for Go's "netgo" implementation
@@ -62,15 +58,14 @@ RUN echo 'hosts: files dns' > /etc/nsswitch.conf
 ENV     FABRIC_CFG_PATH /var/hyperledger/fabric/config
 ENV     FABRIC_VER      ${FABRIC_VER}
 
-COPY    --from=builder  build/bin/peer          /usr/local/bin
-COPY    --from=builder  sampleconfig/msp        ${FABRIC_CFG_PATH}/msp
-COPY    --from=builder  sampleconfig/core.yaml  ${FABRIC_CFG_PATH}/core.yaml
-
-COPY    --from=builder  release/${TARGETOS}-${TARGETARCH}/builders/ccaas/bin /opt/hyperledger/ccaas_builder/bin
+COPY    --from=builder  build/bin/orderer           /usr/local/bin
+COPY    --from=builder  sampleconfig/msp            ${FABRIC_CFG_PATH}/msp
+COPY    --from=builder  sampleconfig/orderer.yaml   ${FABRIC_CFG_PATH}
+COPY    --from=builder  sampleconfig/configtx.yaml  ${FABRIC_CFG_PATH}
 
 VOLUME  /etc/hyperledger/fabric
 VOLUME  /var/hyperledger
 
-EXPOSE  7051
+EXPOSE  7050
 
-CMD     [ "peer", "node", "start" ]
+CMD     [ "orderer", "start" ]

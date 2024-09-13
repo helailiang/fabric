@@ -148,7 +148,7 @@ func NewCoordinator(mspID string, support Support, store *transientstore.Store, 
 	}
 }
 
-// StoreBlock stores block with private data into the ledger
+// StoreBlock stores block with private data into the ledger // 该函数在 gossip/state/state.go 调用
 func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDataCollections) error {
 	if block.Data == nil {
 		return errors.New("Block data is empty")
@@ -162,7 +162,10 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 	c.logger.Debugf("Validating block [%d]", block.Header.Number)
 
 	validationStart := time.Now()
-	err := c.Validator.Validate(block)
+
+	// 校验区块信息和交易签名 VSCC
+	c.logger.Infof("bsn=> Received block [%d] :校验区块信息和交易签名", block.Header.Number)
+	err := c.Validator.Validate(block) //core/committer/txvalidator/v20/validator.go
 	c.reportValidationDuration(time.Since(validationStart))
 	if err != nil {
 		c.logger.Errorf("Validation failed: %+v", err)
@@ -224,6 +227,9 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 
 	// commit block and private data
 	commitStart := time.Now()
+
+	// 提交区块，在此过程中执行 MVCC 验证
+	c.logger.Infof("bsn=> Received block [%d] :提交区块，在此过程中执行 MVCC 验证", block.Header.Number)
 	err = c.CommitLegacy(blockAndPvtData, &ledger.CommitOptions{})
 	c.reportCommitDuration(time.Since(commitStart))
 	if err != nil {

@@ -508,7 +508,7 @@ func (p *Peer) Initialize(
 	}
 
 	for _, cid := range ledgerIds {
-		peerLogger.Infof("Loading chain %s", cid)
+		peerLogger.Infof("bsn=> Loading chain %s", cid)
 		ledger, err := p.LedgerMgr.OpenLedger(cid)
 		if err != nil {
 			peerLogger.Errorf("Failed to load ledger %s(%+v)", cid, err)

@@ -636,6 +636,8 @@ func (l *kvLedger) commit(pvtdataAndBlock *ledger.BlockAndPvtData, commitOpts *l
 	}
 
 	logger.Debugf("[%s] Validating state for block [%d]", l.ledgerID, blockNo)
+	logger.Infof("bsn=>[%s] Validating state for block [%d]", l.ledgerID, blockNo)
+	// 读写集的 MVCC 检查
 	appInitiatedPurgeUpdates, txstatsInfo, updateBatchBytes, err := l.txmgr.ValidateAndPrepare(pvtdataAndBlock, true)
 	if err != nil {
 		return err
@@ -686,7 +688,8 @@ func (l *kvLedger) commit(pvtdataAndBlock *ledger.BlockAndPvtData, commitOpts *l
 			Key:            pvtKey,
 		}] = u.Version
 	}
-
+	// 添加区块到文件系统
+	logger.Infof("bsn=> 通道[%s] 提交快高[%d] 到文件系统", l.ledgerID, blockNo)
 	if err = l.commitToPvtAndBlockStore(pvtdataAndBlock, purgeMarkers); err != nil {
 		return err
 	}
@@ -694,6 +697,7 @@ func (l *kvLedger) commit(pvtdataAndBlock *ledger.BlockAndPvtData, commitOpts *l
 
 	startCommitState := time.Now()
 	l.txmgr.UpdateBatchWithAppInitiatedPvtKeysToPurge(pvtKeysToDelete)
+	// 提交有效数据到状态数据库
 	logger.Debugf("[%s] Committing block [%d] transactions to state database", l.ledgerID, blockNo)
 	if err = l.txmgr.Commit(); err != nil {
 		panic(errors.WithMessage(err, "error during commit to txmgr"))
@@ -801,6 +805,8 @@ func (l *kvLedger) updateBlockStats(
 	l.stats.updateBlockstorageAndPvtdataCommitTime(blockstorageAndPvtdataCommitTime)
 	l.stats.updateStatedbCommitTime(statedbCommitTime)
 	l.stats.updateTransactionsStats(txstatsInfo)
+	l.stats.blockTransactionCountStats(txstatsInfo) // hll
+	l.stats.updateTransactionsAllStats(txstatsInfo) // hll
 }
 
 func (l *kvLedger) addBlockCommitHash(block *common.Block, updateBatchBytes []byte) {

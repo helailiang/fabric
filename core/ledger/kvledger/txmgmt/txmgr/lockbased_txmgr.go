@@ -185,11 +185,25 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 	logger.Debug("lock acquired on oldBlockCommit for validating read set version against the committed version")
 
 	block := blockAndPvtdata.Block
-	logger.Debugf("Validating new block with num trans = [%d]", len(block.Data.Data))
+	logger.Infof("bsn=> Validating new block with num trans = [%d]", len(block.Data.Data))
 	batch, appPurgeUpdates, txstatsInfo, err := txmgr.commitBatchPreparer.ValidateAndPrepareBatch(blockAndPvtdata, doMVCCValidation)
 	if err != nil {
 		txmgr.reset()
 		return nil, nil, nil, err
+	}
+	logger.Warning("bsn => 打印监控交易信息...")
+	for i, txstat := range txstatsInfo {
+		transactionTypeStr := "unknown"
+		if txstat.TxType != -1 {
+			transactionTypeStr = txstat.TxType.String()
+		}
+		chaincodeName := "unknown"
+		if txstat.ChaincodeID != nil {
+			chaincodeName = txstat.ChaincodeID.Name + ":" + txstat.ChaincodeID.Version
+		}
+		logger.Warningf("bsn => 打印监控交易信息..index:%d => channel:%s, transaction_type:%s, chaincode:%s, validation_code:%s",
+			i, txmgr.ledgerid, transactionTypeStr,
+			chaincodeName, txstat.ValidationCode.String())
 	}
 	txmgr.currentUpdates = &currentUpdates{block: block, batch: batch}
 	if err := txmgr.invokeNamespaceListeners(); err != nil {

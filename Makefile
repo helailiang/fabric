@@ -254,6 +254,7 @@ $(BUILD_DIR)/images/%/$(DUMMY):
 		--build-arg TARGETOS=linux \
 		$(BUILD_ARGS) \
 		-t $(DOCKER_NS)/fabric-$* ./$(BUILD_CONTEXT)
+	docker tag $(DOCKER_NS)/fabric-$* $(DOCKER_NS)/fabric-$*:hll
 	@touch $@
 
 # builds release packages for the host platform

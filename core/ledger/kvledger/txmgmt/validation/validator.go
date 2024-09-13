@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package validation
 
 import (
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset/kvrwset"
 	"github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/hyperledger/fabric/core/ledger/internal/version"
@@ -91,7 +92,7 @@ func (v *validator) validateAndPrepareBatch(blk *block, doMVCCValidation bool) (
 
 	updates := newPubAndHashUpdates()
 	purgeTracker := newPvtdataPurgeTracker()
-
+	// 遍历每一笔交易，进行 MVCC 验证，若交易有效，将交易中的写集放入 updates。
 	for _, tx := range blk.txs {
 		var validationCode peer.TxValidationCode
 		var err error
@@ -110,7 +111,7 @@ func (v *validator) validateAndPrepareBatch(blk *block, doMVCCValidation bool) (
 
 			purgeTracker.update(tx.rwset, committingTxHeight)
 		} else {
-			logger.Warningf("Block [%d] Transaction index [%d] TxId [%s] marked as invalid by state validator. Reason code [%s]",
+			logger.Warningf("bsn=> Block [%d] Transaction index [%d] TxId [%s] marked as invalid by state validator. Reason code [%s]",
 				blk.num, tx.indexInBlock, tx.id, validationCode.String())
 		}
 	}
@@ -133,7 +134,7 @@ func (v *validator) validateEndorserTX(
 
 func (v *validator) validateTx(txRWSet *rwsetutil.TxRwSet, updates *publicAndHashUpdates) (peer.TxValidationCode, error) {
 	// Uncomment the following only for local debugging. Don't want to print data in the logs in production
-	// logger.Debugf("validateTx - validating txRWSet: %s", spew.Sdump(txRWSet))
+	logger.Infof("bsn=> validateTx - validating txRWSet: %s", spew.Sdump(txRWSet))
 	for _, nsRWSet := range txRWSet.NsRwSets {
 		ns := nsRWSet.NameSpace
 		// Validate public reads
@@ -190,7 +191,7 @@ func (v *validator) validateKVRead(ns string, kvRead *kvrwset.KVRead, updates *p
 
 	logger.Debugw("Comparing readset version to committed version",
 		"namespace", ns, "key", kvRead.Key, "readVersion", readVersion, "committedVersion", committedVersion)
-
+	// 比较版本是否匹配
 	if !version.AreSame(committedVersion, readVersion) {
 		logger.Warnw("Transaction invalidation due to version mismatch, readset version does not match committed version",
 			"namespace", ns, "key", kvRead.Key, "readVersion", readVersion, "committedVersion", committedVersion)

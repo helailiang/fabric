@@ -191,9 +191,9 @@ func (vdb *versionedDB) ApplyUpdates(batch *statedb.UpdateBatch, height *version
 			dataKey := encodeDataKey(ns, k)
 			logger.Debugf("Channel [%s]: Applying key(string)=[%s] key(bytes)=[%#v]", vdb.dbName, string(dataKey), dataKey)
 
-			if vv.Value == nil {
+			if vv.Value == nil { // 如果值为 nil，表示需要删除该键，函数将在数据库更新批次中添加一个删除操作
 				dbBatch.Delete(dataKey)
-			} else {
+			} else { // 如果值不为 nil，将值编码为字节序列，并将键值对添加到数据库更新批次中
 				encodedVal, err := encodeValue(vv)
 				if err != nil {
 					return err
@@ -210,6 +210,7 @@ func (vdb *versionedDB) ApplyUpdates(batch *statedb.UpdateBatch, height *version
 		dbBatch.Put(savePointKey, height.ToBytes())
 	}
 	// Setting snyc to true as a precaution, false may be an ok optimization after further testing.
+	//将数据库更新批次写入到版本化数据库中，true 表示要求同步写入。
 	return vdb.db.WriteBatch(dbBatch, true)
 }
 

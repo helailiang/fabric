@@ -8,6 +8,9 @@ package validation
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/ledger/rwset"
@@ -47,6 +50,8 @@ type TxStatInfo struct {
 	ChaincodeID           *peer.ChaincodeID
 	ChaincodeEventData    []byte
 	NumCollections        int
+	BlockNumber           uint64 // number hll
+
 }
 
 // NewCommitBatchPreparer constructs a validator that internally manages statebased validator and in addition
@@ -72,7 +77,7 @@ func NewCommitBatchPreparer(
 func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.BlockAndPvtData,
 	doMVCCValidation bool) (*privacyenabledstate.UpdateBatch, []*AppInitiatedPurgeUpdate, []*TxStatInfo, error) {
 	blk := blockAndPvtdata.Block
-	logger.Debugf("ValidateAndPrepareBatch() for block number = [%d]", blk.Header.Number)
+	logger.Infof("ValidateAndPrepareBatch() for block number = [%d]", blk.Header.Number)
 	var internalBlock *block
 	var txsStatInfo []*TxStatInfo
 	var pubAndHashUpdates *publicAndHashUpdates
@@ -81,6 +86,9 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	var err error
 
 	logger.Debug("preprocessing ProtoBlock...")
+	logger.Warning("bsn => preprocessing ProtoBlock...")
+	//将block的原型实例解析为block结构。
+	//返回的'internalBlock'结构只包含背书者交易且未被标记为无效的交易, txsStatInfo 主要是监控数据
 	if internalBlock, txsStatInfo, err = preprocessProtoBlock(
 		p.postOrderSimulatorProvider,
 		p.db.ValidateKeyValue,
@@ -90,7 +98,7 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	); err != nil {
 		return nil, nil, nil, err
 	}
-
+	// 验证读写集
 	if pubAndHashUpdates, purgeUpdates, err = p.validator.validateAndPrepareBatch(internalBlock, doMVCCValidation); err != nil {
 		return nil, nil, nil, err
 	}
@@ -111,11 +119,33 @@ func (p *CommitBatchPreparer) ValidateAndPrepareBatch(blockAndPvtdata *ledger.Bl
 	for i := range txsFilter {
 		txsStatInfo[i].ValidationCode = txsFilter.Flag(i)
 	}
+	WriteFile("/var/hyperledger/production/count.json", fmt.Sprintf("%d  %d", blk.Header.Number, len(txsStatInfo)), 0644)
 	return &privacyenabledstate.UpdateBatch{
 		PubUpdates:  pubAndHashUpdates.publicUpdates,
 		HashUpdates: pubAndHashUpdates.hashUpdates,
 		PvtUpdates:  pvtUpdates,
 	}, purgeUpdates, txsStatInfo, nil
+}
+
+func WriteFile(file string, buf string, perm os.FileMode) error {
+	dir := path.Dir(file)
+	// Create the directory if it doesn't exist
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0755)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create directory '%s' for file '%s'", dir, file)
+		}
+	}
+
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_APPEND, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(buf + "\n")
+	if err1 := f.Close(); err1 != nil && err == nil {
+		err = err1
+	}
+	return err
 }
 
 // validateAndPreparePvtBatch pulls out the private write-set for the transactions that are marked as valid
@@ -211,6 +241,11 @@ func preprocessProtoBlock(postOrderSimulatorProvider PostOrderSimulatorProvider,
 			}
 		}
 		txStatInfo.TxIDFromChannelHeader = chdr.GetTxId()
+		logger.Warningf("bsn => Channel [%s]: Block [%d] Transaction index [%d] TxId [%s]"+
+			" marked as invalid by committer. Reason code [%s]",
+			chdr.GetChannelId(), blk.Header.Number, txIndex, chdr.GetTxId(),
+			txsFilter.Flag(txIndex).String())
+
 		if txsFilter.IsInvalid(txIndex) {
 			// Skipping invalid transaction
 			logger.Warningf("Channel [%s]: Block [%d] Transaction index [%d] TxId [%s]"+
@@ -229,6 +264,7 @@ func preprocessProtoBlock(postOrderSimulatorProvider PostOrderSimulatorProvider,
 		logger.Debugf("txType=%s", txType)
 		txStatInfo.TxType = txType
 		if txType == common.HeaderType_ENDORSER_TRANSACTION {
+			logger.Warningf("bsn => Endorser transaction index [%d] TxType:%d", txIndex, txType)
 			// extract actions from the envelope message
 			respPayload, err := protoutil.GetActionFromEnvelope(envBytes)
 			if err != nil {
@@ -243,6 +279,7 @@ func preprocessProtoBlock(postOrderSimulatorProvider PostOrderSimulatorProvider,
 				continue
 			}
 		} else {
+			logger.Warningf("bsn => 非 Endorser transaction index [%d] TxType:%d", txIndex, txType)
 			rwsetProto, err := processNonEndorserTx(
 				env,
 				chdr.TxId,

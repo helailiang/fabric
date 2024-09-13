@@ -255,6 +255,7 @@ func (s *DB) ApplyUpdates(batch *statedb.UpdateBatch, height *version.Height) er
 func (s *DB) ApplyPrivacyAwareUpdates(updates *UpdateBatch, height *version.Height) error {
 	// combinedUpdates includes both updates to public db and private db, which are partitioned by a separate namespace
 	combinedUpdates := updates.PubUpdates
+	// 这两个函数用于将私有数据更新和哈希更新添加到公共数据更新批次中
 	addPvtUpdates(combinedUpdates, updates.PvtUpdates)
 	addHashedUpdates(combinedUpdates, updates.HashUpdates, !s.BytesKeySupported())
 	if err := s.metadataHint.setMetadataUsedFlag(updates); err != nil {

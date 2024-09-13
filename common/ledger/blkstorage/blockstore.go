@@ -47,6 +47,7 @@ func (store *BlockStore) AddBlock(block *common.Block) error {
 	result := store.fileMgr.addBlock(block)
 	elapsedBlockCommit := time.Since(startBlockCommit)
 
+	// 更新区块高度和提交时间
 	store.updateBlockStats(block.Header.Number, elapsedBlockCommit)
 
 	return result

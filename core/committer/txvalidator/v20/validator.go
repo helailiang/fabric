@@ -182,7 +182,7 @@ func (v *TxValidator) Validate(block *common.Block) error {
 	var errPos int
 
 	startValidation := time.Now() // timer to log Validate block duration
-	logger.Debugf("[%s] START Block Validation for block [%d]", v.ChannelID, block.Header.Number)
+	logger.Infof("[%s] START Block Validation for block [%d]", v.ChannelID, block.Header.Number)
 
 	// Initialize trans as valid here, then set invalidation reason code upon invalidation below
 	txsfltr := txflags.New(len(block.Data.Data))
@@ -198,6 +198,7 @@ func (v *TxValidator) Validate(block *common.Block) error {
 			go func(index int, data []byte) {
 				defer v.Semaphore.Release()
 
+				// 将每个交易封装成结构体并调用 validateTx，将验证结果发送到 results 通道中
 				v.validateTx(&blockValidationRequest{
 					d:     data,
 					block: block,
@@ -210,10 +211,11 @@ func (v *TxValidator) Validate(block *common.Block) error {
 	logger.Debugf("expecting %d block validation responses", len(block.Data.Data))
 
 	// now we read responses in the order in which they come back
+	// 主线程从 results 通道中接收验证结果，并根据结果进行处理
 	for i := 0; i < len(block.Data.Data); i++ {
 		res := <-results
 
-		if res.err != nil {
+		if res.err != nil { // 如果某个交易验证失败，则会记录第一个失败交易的错误
 			// if there is an error, we buffer its value, wait for
 			// all workers to complete validation and then return
 			// the error from the first tx in this block that returned an error
@@ -223,7 +225,7 @@ func (v *TxValidator) Validate(block *common.Block) error {
 				err = res.err
 				errPos = res.tIdx
 			}
-		} else {
+		} else { // 如果结果中没有错误，则将验证结果设置到 txsfltr 中，并将交易 ID 存储到 txidArray 中
 			// if there was no error, we set the txsfltr and we set the
 			// txsChaincodeNames and txsUpgradedChaincodes maps
 			logger.Debugf("got result for idx %d, code %d", res.tIdx, res.validationCode)

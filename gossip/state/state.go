@@ -277,14 +277,14 @@ func NewGossipStateProvider(
 
 func (s *GossipStateProviderImpl) receiveAndQueueGossipMessages(ch <-chan *proto.GossipMessage) {
 	for msg := range ch {
-		s.logger.Debug("Received new message via gossip channel")
+		s.logger.Infof("bsn=> Received new message via gossip channel")
 		go func(msg *proto.GossipMessage) {
 			if !bytes.Equal(msg.Channel, []byte(s.chainID)) {
 				s.logger.Warning("Received enqueue for channel",
 					string(msg.Channel), "while expecting channel", s.chainID, "ignoring enqueue")
 				return
 			}
-
+			// 获取数据
 			dataMsg := msg.GetDataMsg()
 			if dataMsg != nil {
 				if err := s.addPayload(dataMsg.GetPayload(), nonBlocking); err != nil {
@@ -542,8 +542,9 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 		select {
 		// Wait for notification that next seq has arrived
 		case <-s.payloads.Ready():
-			s.logger.Debugf("[%s] Ready to transfer payloads (blocks) to the ledger, next block number is = [%d]", s.chainID, s.payloads.Next())
+			s.logger.Infof("bsn=> [%s] Ready to transfer payloads (blocks) to the ledger, next block number is = [%d]", s.chainID, s.payloads.Next())
 			// Collect all subsequent payloads
+			//取出负载数据
 			for payload := s.payloads.Pop(); payload != nil; payload = s.payloads.Pop() {
 				rawBlock := &common.Block{}
 				if err := pb.Unmarshal(payload.Data, rawBlock); err != nil {
@@ -555,9 +556,9 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 						payload.SeqNum, rawBlock.Header, rawBlock.Data)
 					continue
 				}
-				s.logger.Debugf("[%s] Transferring block [%d] with %d transaction(s) to the ledger", s.chainID, payload.SeqNum, len(rawBlock.Data.Data))
+				s.logger.Infof("bsn=> [%s] Transferring block [%d] with %d transaction(s) to the ledger", s.chainID, payload.SeqNum, len(rawBlock.Data.Data))
 
-				// Read all private data into slice
+				// Read all private data into slice 解析私有数据
 				var p util.PvtDataCollections
 				if payload.PrivateData != nil {
 					err := p.Unmarshal(payload.PrivateData)
@@ -566,6 +567,7 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 						continue
 					}
 				}
+				// 提交区块
 				if err := s.commitBlock(rawBlock, p); err != nil {
 					if executionErr, isExecutionErr := err.(*vsccErrors.VSCCExecutionFailureError); isExecutionErr {
 						s.logger.Errorf("Failed executing VSCC due to %v. Aborting chain processing", executionErr)
@@ -752,7 +754,7 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 	if payload == nil {
 		return errors.New("Given payload is nil")
 	}
-	s.logger.Debugf("[%s] Adding payload to local buffer, blockNum = [%d]", s.chainID, payload.SeqNum)
+	s.logger.Infof("bsn=>[%s] Adding payload to local buffer, blockNum = [%d]", s.chainID, payload.SeqNum)
 	height, err := s.ledger.LedgerHeight()
 	if err != nil {
 		return errors.Wrap(err, "Failed obtaining ledger height")
@@ -772,9 +774,9 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 	for blockingMode && s.payloads.Size() > s.config.StateBlockBufferSize*2 {
 		time.Sleep(enqueueRetryInterval)
 	}
-
+	//将数据添加到负载缓冲区
 	s.payloads.Push(payload)
-	s.logger.Debugf("Blocks payloads buffer size for channel [%s] is %d blocks", s.chainID, s.payloads.Size())
+	s.logger.Infof("bsn=> Blocks payloads buffer size for channel [%s] is %d blocks", s.chainID, s.payloads.Size())
 	return nil
 }
 
@@ -790,7 +792,8 @@ func (s *GossipStateProviderImpl) straggler(currHeight uint64, receivedPayload *
 
 func (s *GossipStateProviderImpl) commitBlock(block *common.Block, pvtData util.PvtDataCollections) error {
 	t1 := time.Now()
-
+	s.logger.Infof("bsn=> [%s] Committed block [%d] with %d transaction(s)",
+		s.chainID, block.Header.Number, len(block.Data.Data))
 	// Commit block with available private transactions
 	if err := s.ledger.StoreBlock(block, pvtData); err != nil {
 		s.logger.Errorf("Got error while committing(%+v)", errors.WithStack(err))

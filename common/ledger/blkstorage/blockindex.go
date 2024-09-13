@@ -81,6 +81,7 @@ func (index *blockIndex) getLastBlockIndexed() (uint64, error) {
 
 func (index *blockIndex) indexBlock(blockIdxInfo *blockIdxInfo) error {
 	// do not index anything
+	logger.Infof("bsn===>index block:blockNum:%d", blockIdxInfo.blockNum)
 	if len(index.indexItemsMap) == 0 {
 		logger.Debug("Not indexing block... as nothing to index")
 		return nil

@@ -671,6 +671,7 @@ func (c *Chain) run() {
 				select {
 				case b := <-ch:
 					data := protoutil.MarshalOrPanic(b)
+					c.logger.Infof("bsn=> Leader:%d 提交区块[%d] 到raft 集群：DataHash:%x; PreviousHash:%x", c.raftID, b.Header.Number, b.Header.DataHash, b.Header.PreviousHash)
 					if err := c.Node.Propose(ctx, data); err != nil {
 						c.logger.Errorf("Failed to propose block [%d] to raft and discard %d blocks in queue: %s", b.Header.Number, len(ch), err)
 						return
@@ -699,6 +700,8 @@ func (c *Chain) run() {
 
 	for {
 		select {
+		// submitC 通道：接收提交请求，根据当前节点的角色进行处理：
+		// 如果节点是 leader，将请求进行排序和处理；如果节点不是 leader，将请求转发给 leader 节点处理。
 		case s := <-submitC:
 			if s == nil {
 				// polled by `WaitReady`
@@ -711,10 +714,11 @@ func (c *Chain) run() {
 			}
 
 			s.leader <- soft.Lead
+			// 如果当前节点的领导者不是自身节点，则继续下一次循环。
 			if soft.Lead != c.raftID {
 				continue
 			}
-
+			// 如果当前节点是领导者，对提交请求进行排序和处理
 			batches, pending, err := c.ordered(s.req)
 			if err != nil {
 				c.logger.Errorf("Failed to order message: %s", err)
@@ -730,7 +734,7 @@ func (c *Chain) run() {
 			} else {
 				stopTimer()
 			}
-
+			// 提交排序后的请求并出块
 			c.propose(propC, bc, batches...)
 
 			if c.configInflight {
@@ -752,10 +756,12 @@ func (c *Chain) run() {
 					atomic.StoreUint64(&c.lastKnownLeader, newLeader)
 
 					if newLeader == c.raftID {
+						c.logger.Infof("bsn=> %d变成leader", c.raftID)
 						propC, cancelProp = becomeLeader()
 					}
 
 					if soft.Lead == c.raftID {
+						c.logger.Infof("bsn=> %d变成Follower", c.raftID)
 						becomeFollower()
 					}
 				}
@@ -995,7 +1001,7 @@ func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelop
 func (c *Chain) propose(ch chan<- *common.Block, bc *blockCreator, batches ...[]*common.Envelope) {
 	for _, batch := range batches {
 		b := bc.createNextBlock(batch)
-		c.logger.Infof("Created block [%d], there are %d blocks in flight", b.Header.Number, c.blockInflight)
+		c.logger.Infof("bsn=> Created block [%d], there are %d blocks in flight", b.Header.Number, c.blockInflight)
 
 		select {
 		case ch <- b:
