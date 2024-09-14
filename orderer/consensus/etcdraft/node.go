@@ -143,6 +143,7 @@ func (n *node) run(campaign bool) {
 		case rd := <-n.Ready():
 			n.logger.Infof("bsn=>当前raft:%d 收到集群发来的Ready通知", n.chain.raftID)
 			startStoring := n.clock.Now()
+			n.logger.Debugf("bsn=>当前raft:%d 将收到信息保存到wal；HardState:%s", n.chain.raftID, rd.HardState.String())
 			if err := n.storage.Store(rd.Entries, rd.HardState, rd.Snapshot); err != nil {
 				n.logger.Panicf("Failed to persist etcd/raft data: %s", err)
 			}
@@ -153,11 +154,14 @@ func (n *node) run(campaign bool) {
 			}
 
 			if !raft.IsEmptySnap(rd.Snapshot) {
+				n.logger.Infof("bsn=>当前raft:%d 存在需要快照条目，通知 snapC", n.chain.raftID)
 				n.chain.snapC <- &rd.Snapshot
 			}
 
 			// skip empty apply
 			if len(rd.CommittedEntries) != 0 || rd.SoftState != nil {
+				n.logger.Infof("bsn=>当前raft:%d 存在需要提交条目，通知 applyC,其中SoftState：Lead:%d StateType：%s",
+					n.chain.raftID, rd.SoftState.Lead, rd.SoftState.RaftState.String())
 				n.maybeSyncWAL(rd.CommittedEntries)
 				n.chain.applyC <- apply{rd.CommittedEntries, rd.SoftState}
 			}
@@ -190,6 +194,7 @@ func (n *node) run(campaign bool) {
 }
 
 func (n *node) send(msgs []raftpb.Message) {
+	n.logger.Infof("node间的消息交互")
 	n.unreachableLock.RLock()
 	defer n.unreachableLock.RUnlock()
 

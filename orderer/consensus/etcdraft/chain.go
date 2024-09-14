@@ -157,8 +157,8 @@ type Chain struct {
 	lastKnownLeader uint64
 	ActiveNodes     atomic.Value
 
-	submitC  chan *submit // orderer/consensus/etcdraft/chain.go:550
-	applyC   chan apply
+	submitC  chan *submit          // orderer/consensus/etcdraft/chain.go:550
+	applyC   chan apply            //存放数据在 orderer/consensus/etcdraft/node.go:164
 	observeC chan<- raft.SoftState // Notifies external observer on leader change (passed in optionally as an argument for tests)
 	haltC    chan struct{}         // Signals to goroutines that the chain is halting
 	doneC    chan struct{}         // Closes when the chain halts
@@ -394,7 +394,7 @@ func (c *Chain) Start() {
 	c.periodicChecker.Run()
 }
 
-// Order submits normal type transactions for ordering.
+// Order submits normal type transactions for ordering.只要是普通类型的事件都会走Order，来push到后端的共识服务。
 func (c *Chain) Order(env *common.Envelope, configSeq uint64) error {
 	c.Metrics.NormalProposalsReceived.Add(1)
 	return c.Submit(&orderer.SubmitRequest{LastValidationSeq: configSeq, Payload: env, Channel: c.channelID}, 0)
@@ -499,7 +499,7 @@ func (c *Chain) isRunning() error {
 	return nil
 }
 
-// Consensus passes the given ConsensusRequest message to the raft.Node instance
+// Consensus passes the given ConsensusRequest message to the raft.Node instance 传递集群中那些节点活跃
 func (c *Chain) Consensus(req *orderer.ConsensusRequest, sender uint64) error {
 	if err := c.isRunning(); err != nil {
 		return err
@@ -508,7 +508,7 @@ func (c *Chain) Consensus(req *orderer.ConsensusRequest, sender uint64) error {
 	if err := proto.Unmarshal(req.Payload, stepMsg); err != nil {
 		return fmt.Errorf("failed to unmarshal StepRequest payload to Raft Message: %s", err)
 	}
-	c.logger.Infof("bsn=> %d 接收ConsensusRequest请求  from:%d 到 to:%d", c.raftID, stepMsg.From, stepMsg.To)
+	c.logger.Infof("bsn=> Channel:%s %d 接收ConsensusRequest请求  from:%d 到 to:%d", c.channelID, c.raftID, stepMsg.From, stepMsg.To)
 
 	if stepMsg.To != c.raftID {
 		c.logger.Warnf("Received msg to %d, my ID is probably wrong due to out of date, cowardly halting", stepMsg.To)
@@ -540,6 +540,7 @@ func (c *Chain) Consensus(req *orderer.ConsensusRequest, sender uint64) error {
 // - the actual leader via the transport mechanism
 // The call fails if there's no leader elected yet.
 func (c *Chain) Submit(req *orderer.SubmitRequest, sender uint64) error {
+	c.logger.Infof("bsn=> %s order节点接收到交易", c.channelID)
 	if err := c.isRunning(); err != nil {
 		c.Metrics.ProposalFailures.Add(1)
 		return err
@@ -755,8 +756,9 @@ func (c *Chain) run() {
 			}
 
 		case app := <-c.applyC:
-			c.logger.Info("bsn=> 接收到Raft leader changed通知")
+			c.logger.Info("bsn=> 接收到Raft applyC")
 			if app.soft != nil {
+				c.logger.Info("bsn=> 接收到Raft leader changed通知")
 				newLeader := atomic.LoadUint64(&app.soft.Lead) // etcdraft requires atomic access
 				if newLeader != soft.Lead {
 					c.logger.Infof("Raft leader changed: %d -> %d", soft.Lead, newLeader)
@@ -868,7 +870,7 @@ func (c *Chain) run() {
 					c.logger.Warnf("bsn=>Skip snapshot taken at index %d, because it is behind current applied index %d", sn.Metadata.Index, c.appliedIndex)
 					break
 				}
-
+				//记录了成员列表，以及learner列表
 				c.confState = sn.Metadata.ConfState
 				c.appliedIndex = sn.Metadata.Index
 			} else {
@@ -1037,7 +1039,7 @@ func (c *Chain) catchUp(snap *raftpb.Snapshot) error {
 	if err != nil {
 		return errors.Errorf("failed to unmarshal snapshot data to block: %s", err)
 	}
-	c.logger.Infof("bsn=>Snapshot is at block [%d], local block number is %d", b.Header.Number, c.lastBlock.Header.Number)
+	c.logger.Infof("bsn=>channel:%s Snapshot is at block [%d], local block number is %d", c.channelID, b.Header.Number, c.lastBlock.Header.Number)
 	if c.lastBlock.Header.Number >= b.Header.Number {
 		c.logger.Warnf("Snapshot is at block [%d], local block number is %d, no sync needed", b.Header.Number, c.lastBlock.Header.Number)
 		return nil
@@ -1057,6 +1059,7 @@ func (c *Chain) catchUp(snap *raftpb.Snapshot) error {
 	next := c.lastBlock.Header.Number + 1
 
 	c.logger.Infof("Catching up with snapshot taken at block [%d], starting from block [%d]", b.Header.Number, next)
+	c.logger.Infof("bsn=> 将从当前快高 [%d]开始追赶快照块高[%d]", next, b.Header.Number)
 
 	for next <= b.Header.Number {
 		// 对接的Orderer的deliver服务拉取block
@@ -1137,7 +1140,7 @@ func (c *Chain) apply(ents []raftpb.Entry) {
 	if len(ents) == 0 {
 		return
 	}
-	c.logger.Infof("bsn=> first index of committed entry[%d] should <= appliedIndex[%d]+1", ents[0].Index, c.appliedIndex)
+	c.logger.Infof("bsn=> Term:[%d] first index of committed entry[%d] should <= appliedIndex[%d]+1", ents[0].Term, ents[0].Index, c.appliedIndex)
 	if ents[0].Index > c.appliedIndex+1 {
 		c.logger.Panicf("first index of committed entry[%d] should <= appliedIndex[%d]+1", ents[0].Index, c.appliedIndex)
 	}
