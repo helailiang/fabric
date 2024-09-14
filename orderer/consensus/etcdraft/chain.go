@@ -504,11 +504,11 @@ func (c *Chain) Consensus(req *orderer.ConsensusRequest, sender uint64) error {
 	if err := c.isRunning(); err != nil {
 		return err
 	}
-
 	stepMsg := &raftpb.Message{}
 	if err := proto.Unmarshal(req.Payload, stepMsg); err != nil {
 		return fmt.Errorf("failed to unmarshal StepRequest payload to Raft Message: %s", err)
 	}
+	c.logger.Infof("bsn=> %d 接收ConsensusRequest请求到RaftID: %d", c.raftID, stepMsg.To)
 
 	if stepMsg.To != c.raftID {
 		c.logger.Warnf("Received msg to %d, my ID is probably wrong due to out of date, cowardly halting", stepMsg.To)

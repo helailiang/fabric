@@ -141,6 +141,7 @@ func (n *node) run(campaign bool) {
 			n.tracker.Check(&status)
 
 		case rd := <-n.Ready():
+			n.logger.Infof("bsn=>当前raft:%d 收到集群发来的Ready通知", n.chain.raftID)
 			startStoring := n.clock.Now()
 			if err := n.storage.Store(rd.Entries, rd.HardState, rd.Snapshot); err != nil {
 				n.logger.Panicf("Failed to persist etcd/raft data: %s", err)
@@ -208,7 +209,7 @@ func (n *node) send(msgs []raftpb.Message) {
 		}
 
 		msgBytes := protoutil.MarshalOrPanic(&msg)
-		n.logger.Infof("bsn=> 想%d发送channel:%s ConsensusRequest", msg.To, n.chainID)
+		n.logger.Infof("bsn=> 向RaftID: %d 发送channel:%s ConsensusRequest", msg.To, n.chainID)
 		err := n.rpc.SendConsensus(msg.To, &orderer.ConsensusRequest{Channel: n.chainID, Payload: msgBytes})
 		if err != nil {
 			n.ReportUnreachable(msg.To)
