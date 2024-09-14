@@ -756,7 +756,7 @@ func (c *Chain) run() {
 			}
 
 		case app := <-c.applyC:
-			c.logger.Info("bsn=> 接收到Raft applyC")
+			c.logger.Infof("bsn=> channel [%s] 接收到Raft applyC,当前 Raft leader:[%d]", c.channelID, soft.Lead)
 			if app.soft != nil {
 				c.logger.Info("bsn=> 接收到Raft leader changed通知")
 				newLeader := atomic.LoadUint64(&app.soft.Lead) // etcdraft requires atomic access
