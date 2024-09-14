@@ -161,7 +161,7 @@ func (n *node) run(campaign bool) {
 			// skip empty apply
 			if len(rd.CommittedEntries) != 0 || rd.SoftState != nil {
 				n.logger.Infof("bsn=>当前raft:%d 存在需要提交条目，通知 applyC,其中SoftState：%#v",
-					n.chain.raftID, rd.SoftState.Lead)
+					n.chain.raftID, rd.SoftState)
 				n.maybeSyncWAL(rd.CommittedEntries)
 				n.chain.applyC <- apply{rd.CommittedEntries, rd.SoftState}
 			}
